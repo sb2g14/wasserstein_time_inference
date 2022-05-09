@@ -1,7 +1,5 @@
 import numpy as np
 import scipy as sp
-import scipy.misc
-import scipy.optimize
 
 import time
 import dill
@@ -16,7 +14,7 @@ def logmatvec(mat, vec):
     sum_shape = [ *mat.shape ] + [ 1 for i in range(vec.ndim - 1) ]
     sums = mat.reshape(sum_shape) + vec[np.newaxis,...]
     
-    ret = sp.misc.logsumexp(sums, axis=1)
+    ret = sp.special.logsumexp(sums, axis=1)
     return ret
 
 def logmatvec_sepkernel(v, log_Ks):
@@ -273,7 +271,7 @@ class ParticleDistribution:
                     K = log_Ks[-j-1]
 
                     if j == i:
-                        K = K + np.log(Cs[-j-1])
+                        K = K + np.log(Cs[-j-1] + 1e-12)
 
                     F = logmatvec(K, F)
 

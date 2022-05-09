@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 import pdist
+from scipy.optimize import fsolve
     
 dtype = np.double
 
@@ -250,6 +251,9 @@ class ParticleSystem:
     ### MAIN LOOP ###
     def run(self, tmax, disable_pbar=True):
         """ Run simulation for tmax time units using the Gillespie algorithm """
+        #if kwargs["extras"] is not None:
+        #    params = kwargs["extras"]
+
         t0 = self.t
         
         gen_rates = self.gen_rates
@@ -324,6 +328,301 @@ class ParticleSystem:
             # This set sprogress bar value to t0 + tmax
             pbar.update(dt - (self.t - t0 - tmax))
             self.t = t0 + tmax
+
+    ### MAIN LOOP ###
+    def run_time(self, tmax, disable_pbar=True, **kwargs):
+        """ Run simulation for tmax time units using the Gillespie algorithm """
+        t0 = self.t
+        # Applicabale to kb=kb0/(t+tau)**h as the only bimolecular reaction
+        assert len(self.system.reactions_bi) == 1
+        params = kwargs['extra']
+        assert len(params) == 3
+        kb0 = params[0]
+        tau = params[1]
+        h = params[2]
+        # print("Time", t0)
+
+        gen_rates = self.gen_rates
+
+        with tqdm(total=tmax,
+                  desc="Time simulated: ",
+                  unit="s",
+                  disable=disable_pbar) as pbar:
+            while True:
+                uni_rates = self.uni_rates * self.counts[self.uni_spec]
+                # print("Uni rates", uni_rates)
+                # Valid for only 1 bimolecular reaction with rate 1
+                bi_rates = self.compute_bi_rates()*kb0/(self.t+tau)**h
+                # print("Bi rates", bi_rates)
+                rate = np.sum(gen_rates) + np.sum(uni_rates) + np.sum(bi_rates)
+                B = rate
+                # print("a0 ", rate)
+                # Because the bimolecular propensity function is monotonically decreasing we set B=rate
+                L = tmax + t0 - self.t
+
+                # Nothing happening
+                if rate == 0.0 or not np.isfinite(rate):
+                    if not np.isfinite(rate):
+                        logger.warning("Numerical blow-up in CME simulation")
+
+                    # Pretend the last reaction happened at time tmax.
+                    # This is necessary for updating progress bar correctly.
+                    dt = 0
+                    break
+                dt = self.rng.exponential(1 / rate)
+                # print("Tau", dt)
+                if dt > L:
+                    self.t += L
+                else:
+                    self.t += dt
+                # print("t0 ", t0)
+                # print("time", self.t)
+                # print("end", tmax)
+                if self.t >= t0 + tmax:
+                    # print("Time for a break!")
+                    break
+
+                if dt < L:
+                    # The Gillespie algorithm randomly samples a possible event
+                    # with probabilities proportional to the rates
+                    # p = self.rng.uniform(0, rate)
+                    p = self.rng.uniform(0, B)
+
+                    # The 'normal' reaction fires
+                    if rate >= p:
+                        # print("Reaction happens!")
+                        # Zero-molecular reaction happening
+                        if p <= np.sum(gen_rates):
+                            for reac, rate in zip(self.system.reactions_gen, gen_rates):
+                                if p >= rate:
+                                    p -= rate
+                                    continue
+
+                                event = self.perform_gen_reaction(reac)
+                                self.events.append((self.t, event))
+                                break
+
+                        # Unimolecular reaction happening
+                        elif p <= np.sum(gen_rates) + np.sum(uni_rates):
+                            p -= np.sum(gen_rates)
+
+                            for reac in self.system.reactions_uni:
+                                if p >= reac.rate * self.counts[reac.spec]:
+                                    p -= reac.rate * self.counts[reac.spec]
+                                    # print("Unimolecular reaction")
+                                    continue
+
+                                event = self.perform_uni_reaction(reac)
+                                self.events.append((self.t, event))
+                                break
+
+                        # Bimolecular reaction happening (valid for only 1 bimolecular reaction)
+                        else:
+                            p -= np.sum(gen_rates) + np.sum(uni_rates)
+
+                            event = self.perform_bi_reaction(self.system.reactions_bi[0], bi_rates)
+                            self.events.append((self.t, event))
+
+            pbar.update(dt)
+            # This set sprogress bar value to t0 + tmax
+            pbar.update(dt - (self.t - t0 - tmax))
+            self.t = t0 + tmax
+
+    ### MAIN LOOP ###
+    def run_time_3(self, tmax, disable_pbar=True, **kwargs):
+        """ Run simulation for tmax time units using the Gillespie algorithm """
+        t0 = self.t
+        # Applicabale to kb=kb0/(t+tau)**h as 3 first bimolecular reactions
+        assert len(self.system.reactions_bi) == 3
+        params = kwargs['extra']
+        assert len(params) == 9
+        k10 = params[0]
+        tau1 = params[1]
+        h1 = params[2]
+        k20 = params[3]
+        tau2 = params[4]
+        h2 = params[5]
+        k30 = params[6]
+        tau3 = params[7]
+        h3 = params[8]
+        # print("Time", t0)
+
+        gen_rates = self.gen_rates
+
+        with tqdm(total=tmax,
+                  desc="Time simulated: ",
+                  unit="s",
+                  disable=disable_pbar) as pbar:
+            while True:
+                uni_rates = self.uni_rates * self.counts[self.uni_spec]
+                # print("Uni rates", uni_rates)
+                # Valid for only 3 bimolecular reactions with rates 1
+                bi_rates = self.compute_bi_rates() * np.array([k10/(self.t+tau1)**h1, k20/(self.t+tau2)**h2, k30/(self.t+tau3)**h3])
+                # print("Bi rates", bi_rates)
+                rate = np.sum(gen_rates) + np.sum(uni_rates) + np.sum(bi_rates)
+                B = rate
+                # print("a0 ", rate)
+                # Because the bimolecular propensity function is monotonically decreasing we set B=rate
+                L = tmax + t0 - self.t
+
+                # Nothing happening
+                if rate == 0.0 or not np.isfinite(rate):
+                    if not np.isfinite(rate):
+                        logger.warning("Numerical blow-up in CME simulation")
+
+                    # Pretend the last reaction happened at time tmax.
+                    # This is necessary for updating progress bar correctly.
+                    dt = 0
+                    break
+                dt = self.rng.exponential(1 / rate)
+                # print("Tau", dt)
+                if dt > L:
+                    self.t += L
+                else:
+                    self.t += dt
+                # print("t0 ", t0)
+                # print("time", self.t)
+                # print("end", tmax)
+                if self.t >= t0 + tmax:
+                    # print("Time for a break!")
+                    break
+
+                if dt < L:
+                    # The Gillespie algorithm randomly samples a possible event
+                    # with probabilities proportional to the rates
+                    # p = self.rng.uniform(0, rate)
+                    p = self.rng.uniform(0, B)
+
+                    # The 'normal' reaction fires
+                    if rate >= p:
+                        # print("Reaction happens!")
+                        # Zero-molecular reaction happening
+                        if p <= np.sum(gen_rates):
+                            for reac, rate in zip(self.system.reactions_gen, gen_rates):
+                                if p >= rate:
+                                    p -= rate
+                                    continue
+
+                                event = self.perform_gen_reaction(reac)
+                                self.events.append((self.t, event))
+                                break
+
+                        # Unimolecular reaction happening
+                        elif p <= np.sum(gen_rates) + np.sum(uni_rates):
+                            p -= np.sum(gen_rates)
+
+                            for reac in self.system.reactions_uni:
+                                if p >= reac.rate * self.counts[reac.spec]:
+                                    p -= reac.rate * self.counts[reac.spec]
+                                    # print("Unimolecular reaction")
+                                    continue
+
+                                event = self.perform_uni_reaction(reac)
+                                self.events.append((self.t, event))
+                                break
+
+                        # Bimolecular reaction happening (valid for only for bimolecular reactions initialised in the beginning)
+                        else:
+                            p -= np.sum(gen_rates) + np.sum(uni_rates)
+
+                            for reac, rates in zip(self.system.reactions_bi, bi_rates):
+                                if p >= np.sum(rates):
+                                    p -= np.sum(rates)
+                                    continue
+
+                                event = self.perform_bi_reaction(reac, rates)
+                                self.events.append((self.t, event))
+                                break
+            pbar.update(dt)
+            # This set sprogress bar value to t0 + tmax
+            pbar.update(dt - (self.t - t0 - tmax))
+            self.t = t0 + tmax
+
+    ### MAIN LOOP ###
+    def run_time_solve(self, tmax, disable_pbar=True, **kwargs):
+        """ Run simulation for tmax time units using the modified Gillespie algorithm """
+        t0 = self.t
+        params = kwargs['extra']
+        assert len(params) == 3
+        kb0 = params[0]
+        tau_p = params[1]
+        h = params[2]
+
+        gen_rates = self.gen_rates
+        with tqdm(total=tmax,
+                  desc="Time simulated: ",
+                  unit="s",
+                  disable=disable_pbar) as pbar:
+            while True:
+                uni_rates = self.uni_rates * self.counts[self.uni_spec]
+                bi_rates = self.compute_bi_rates()
+
+                rgen = np.log(1 / self.rng.uniform())
+                func = lambda tau: (np.sum(gen_rates) + np.sum(uni_rates)) * tau - np.log(1/rgen) + (1/(-1 + h))*kb0*((t0 + tau_p)*(t0 + tau + tau_p))**(-h)*(-(t0 + tau_p)**h*(t0 + tau + tau_p) + (t0 + tau_p)*(t0 + tau + tau_p)**h)
+                dt = fsolve(func, 1)[0]
+                print(dt)
+                # dt = r
+                multiplier = kb0/(t0 + dt + tau_p)**h
+                rate = np.sum(gen_rates) + np.sum(uni_rates) + np.sum(bi_rates) * multiplier
+                # Nothing happening
+                if rate == 0.0 or not np.isfinite(rate):
+                    if not np.isfinite(rate):
+                        logger.warning("Numerical blow-up in CME simulation")
+
+                    # Pretend the last reaction happened at time tmax.
+                    # This is necessary for updating progress bar correctly.
+                    dt = 0
+                    break
+                self.t += dt
+                if self.t > t0 + tmax:
+                    break
+
+                pbar.update(dt)
+
+                # The Gillespie algorithm randomly samples a possible event
+                # with probabilities proportional to the rates
+                p = self.rng.uniform(0, rate)
+
+                # Zero-molecular reaction happening
+                if p <= np.sum(gen_rates):
+                    for reac, rate in zip(self.system.reactions_gen, gen_rates):
+                        if p >= rate:
+                            p -= rate
+                            continue
+
+                        event = self.perform_gen_reaction(reac)
+                        self.events.append((self.t, event))
+                        break
+
+                # Unimolecular reaction happening
+                elif p <= np.sum(gen_rates) + np.sum(uni_rates):
+                    p -= np.sum(gen_rates)
+
+                    for reac in self.system.reactions_uni:
+                        if p >= reac.rate * self.counts[reac.spec]:
+                            p -= reac.rate * self.counts[reac.spec]
+                            continue
+
+                        event = self.perform_uni_reaction(reac)
+                        self.events.append((self.t, event))
+                        break
+
+                # Bimolecular reaction happening
+                else:
+                    p -= np.sum(gen_rates) + np.sum(uni_rates)
+
+                    for reac, rates in zip(self.system.reactions_bi, bi_rates):
+                        if p >= np.sum(rates*multiplier):
+                            p -= np.sum(rates*multiplier)
+                            continue
+
+                        event = self.perform_bi_reaction(reac, rates)
+                        self.events.append((self.t, event))
+                        break
+
+            # This set sprogress bar value to t0 + tmax
+            pbar.update(dt - (self.t - t0 - tmax))
+            self.t = t0 + tmax
     
     def get_dist(self, t_max=None):
         """ 
@@ -372,3 +671,111 @@ class ParticleSystem:
         weights[i] = t_max - t_last
 
         return pdist.ParticleDistribution(counts[:,:i+1], weights=weights[:i+1])
+
+    def get_dist_samples(self, event_list, t_max=None, n_samples=1, max_iter=1, pairs=False):
+        """
+            Return the distribution of particle numbers over the lifetime of the system
+            for multiple samples.
+        """
+        # Calculate indexes for each iteration separately
+        index = np.zeros(max_iter, dtype=int)
+        # Calculate maximal size of the array (including the ends)
+        event_num = sum([len(listElem) + 1 for listElem in event_list])
+        counts = np.zeros((self.system.n_species, event_num, max_iter), dtype=int)
+        weights = np.zeros((event_num, max_iter))
+        for sample, events in enumerate(event_list):
+            for iter in range(max_iter):
+                i = index[iter]
+                t_last = 0
+                for t, e in events:
+                    if t > t_max*(iter + 1):
+                        continue
+
+                    weights[i, iter] = t - t_last
+                    t_last = t
+
+                    i += 1
+                    counts[:, i, iter] = counts[:, i - 1, iter]
+                    if e[0] == "gen":
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+                    if e[0] == "uni":
+                        reac = e[1]
+                        counts[reac.spec][i][iter] -= 1
+
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+                    elif e[0] == "bi":
+                        reac = e[1]
+
+                        counts[reac.specA][i][iter] -= 1
+                        counts[reac.specB][i][iter] -= 1
+
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+
+                weights[i][iter] = t_max*(iter + 1) - t_last
+                # Account for the end of the iteration
+                index[iter] = i + 1
+        dist_list = []
+        for iter in range(max_iter):
+            dist_list.append(pdist.ParticleDistribution(counts[:, :index[iter], iter], weights=weights[:index[iter], iter]))
+        return dist_list
+
+
+    def get_dist_samples_separate(self, event_list, t_max=None, n_samples=1, max_iter=1, pairs=False):
+        """
+            Return the distribution of particle numbers over the lifetime of the system
+            for multiple samples.
+        """
+        # Calculate indexes for each iteration separately
+        index = np.zeros(max_iter, dtype=int)
+        # Calculate maximal size of the array (including the ends)
+        event_num = sum([len(listElem) + 1 for listElem in event_list])
+        counts = np.zeros((self.system.n_species, event_num, max_iter), dtype=int)
+        weights = np.zeros((event_num, max_iter))
+        for sample, events in enumerate(event_list):
+            for iter in range(max_iter):
+                i = index[iter]
+                t_last = 0
+                for t, e in events:
+                    if t > t_max*(iter + 1):
+                        continue
+
+                    weights[i, iter] = t - t_last
+                    t_last = t
+
+                    i += 1
+                    counts[:, i, iter] = counts[:, i - 1, iter]
+                    if e[0] == "gen":
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+                    if e[0] == "uni":
+                        reac = e[1]
+                        counts[reac.spec][i][iter] -= 1
+
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+                    elif e[0] == "bi":
+                        reac = e[1]
+
+                        counts[reac.specA][i][iter] -= 1
+                        counts[reac.specB][i][iter] -= 1
+
+                        product_log = e[2]
+                        for spec_product in product_log:
+                            counts[spec_product][i][iter] += 1
+
+                weights[i][iter] = t_max*(iter + 1) - t_last
+                # Account for the end of the iteration
+                index[iter] = i + 1
+        dist_list = []
+        for iter in range(max_iter):
+            for part_num in range(np.shape(counts)[0]):
+                dist_list.append(pdist.ParticleDistribution(counts[part_num, :index[iter], iter], weights=weights[:index[iter], iter]))
+        return dist_list
