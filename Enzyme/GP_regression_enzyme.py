@@ -171,18 +171,19 @@ if __name__ == '__main__':
     plt.xlabel('$\phi$')
     #ax3.set_yscale('log')
     plt.ylabel('RE')
-    plt.legend()
+    #plt.legend()
     plt.text(-0.18, 1.0, '(d)', fontweight='bold',
              horizontalalignment='center',
              verticalalignment='center',
              transform=ax3.transAxes)
 
     # Plot CA time vs SSA time
-    t_SSA = [0.34493064880371094, 0.5092401504516602, 0.4865267276763916, 0.41924166679382324]
-    t_BD = [181.413, 179.441, 175.003, 178.102]
+    #t_SSA = 500*np.array([0.34493064880371094, 0.5092401504516602, 0.4865267276763916, 0.41924166679382324])
+    t_SSA = np.array([0.000823974609375, 0.0005898475646972656, 0.00055694580078125, 0.0005347728729248047])
+    t_BD = 2000*np.array([181.413, 179.441, 175.003, 178.102])
     ax4 = fig.add_subplot(2, 3, 5)
     plt.plot(X_test, t_SSA, color=colors[-1], linestyle="None", marker=markers[0], markersize=20,
-             label="SSA")
+             label="GP")
     plt.plot(X_test, t_BD, color=colors[1], linestyle="None", marker=markers[1], markersize=20,
              label="CA")
     plt.xlabel('$\phi$')

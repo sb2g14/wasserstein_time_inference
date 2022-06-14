@@ -392,3 +392,45 @@ def get_time(phi, r_a, r_b, r_cr, R, n_files, path_to_times_bi, path_to_times):
 
     return times.seconds, times_bi.seconds
 
+def get_time_gene(phi, r_a, r_b, r_cr, R, n_files, path_to_times_gene, path_to_times):
+
+    if phi == 0.0:
+        n_cr = 0
+        r_cr = 0
+    else:
+        n_cr = int(phi*R**2)
+    #n_cr = round(1/r_cr**3*(3.0*phi*R**3/(4.0*np.pi) - initial_state[0]*r_a**3 - initial_state[1]*r_b**3))
+    if n_cr < 0:
+        n_cr = 0
+
+
+    # Import inference of enzyme reaction times from optuna
+    file_name = 'time_phi_{0}_ncr_{1}_ra_{2}_rb_{3}_rcr_{4}_R_{5}_nfiles_{6}_0.txt'.format(phi, n_cr, r_a, r_b, r_cr, R, n_files)
+    print(file_name)
+    cwd = os.getcwd()
+    #times = np.genfromtxt(path_to_times + file_name, delimiter='\n')
+    with open(path_to_times + file_name) as f1:
+        content = f1.readlines()
+        begin = datetime.datetime.strptime(content[0].rstrip(), '%Y-%m-%d %H:%M:%S.%f')
+        end = datetime.datetime.strptime(content[-1].rstrip(), '%Y-%m-%d %H:%M:%S.%f')
+        times = end - begin
+    print(times)
+    f1.close()
+
+    n_cr = int(n_cr/2)
+    # Import gene inference times from optuna
+    file_name_gene = 'time_phi_{0}_ncr_{1}_r_{2}_rcr_{3}_R_{4}_nfiles_{5}_0.txt'.format(phi, n_cr, r_a, r_cr, R, n_files)
+    print(file_name_gene)
+    cwd = os.getcwd()
+    #times_bi = np.genfromtxt(path_to_times_bi + file_name_bi, delimiter='\n')
+    with open(path_to_times_gene + file_name_gene) as f2:
+        content = f2.readlines()
+        begin = datetime.datetime.strptime(content[0].rstrip(), '%Y-%m-%d %H:%M:%S.%f')
+        end = datetime.datetime.strptime(content[-1].rstrip(), '%Y-%m-%d %H:%M:%S.%f')
+        times_gene = end - begin
+    print(times_gene)
+    f2.close()
+
+    return times.seconds, times_gene.seconds
+
+
